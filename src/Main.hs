@@ -33,10 +33,10 @@ toVertex (x,y) = vertex $ Vertex2 (unsafeCoerce x :: GLdouble) (unsafeCoerce y)
 -- circle around position
 circle :: (GLdouble, GLdouble) -> IO ()
 circle (x,y) = preservingMatrix $ do
-    let r = 0.3
-        poly  = 24
+    let poly  = 24
         ang p = p * 2 * pi / poly
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
+        r = 0.5
     color $ Color3 1 0 (0 :: GLdouble)
     renderPrimitive Graphics.UI.GLUT.Polygon $
         mapM_ (toVertex) pos
@@ -44,6 +44,14 @@ circle (x,y) = preservingMatrix $ do
     renderPrimitive Graphics.UI.GLUT.LineLoop $
         mapM_ (toVertex) pos
 
+-- position of rectangle: it's centre top
+rectangle :: GLdouble -> IO ()
+rectangle x1 = do
+            color $ Color3 0 0 (0 :: GLdouble)
+            let y1 = -0.1  -- constant y
+                pos   = map (\(w, h) -> (x1 + w, y1 + h)) [(-0.5,0), (0.5,0), (0.5, -0.2), (-0.5, -0.2)]
+            renderPrimitive Graphics.UI.GLUT.Polygon $
+                mapM_ (toVertex) pos
 
 display :: State -> DisplayCallback
 display state = do
@@ -55,6 +63,8 @@ display state = do
       translatef (Vector3 (-1) 0 0)
       x <- get (x state)
       y <- get (y state)
+      circle (0.5, 0.5)
+      rectangle 0.5
       translatef (Vector3 1 0 0)
       preservingMatrix $ do
          translatef (Vector3 1 0 0)
