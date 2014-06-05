@@ -14,14 +14,15 @@ import System.Exit ( exitWith, ExitCode(ExitSuccess) )
 import Graphics.UI.GLUT hiding (position, scale)
 import Unsafe.Coerce
 import Physics.Hipmunk hiding (Position)
+import Control.Concurrent.MVar
 
-data State = State { x, y :: IORef GLdouble }
+data GameState = GameState { ledgePos :: CpFloat }
+data State = MVar { gameState :: GameState }
 
-makeState :: IO State
-makeState = do
-   x <- newIORef 0.05
-   y <- newIORef 0.05
-   return $ State { x = x, y = y }
+makeState :: IO (MVar GameState)
+makeState = do let gamestate = GameState { ledgePos = 0.5 }
+               gamestate <- newMVar gamestate
+               return gamestate
 
 myInit :: IO ()
 myInit = do
@@ -54,16 +55,13 @@ rectangle x1 = do
             renderPrimitive Graphics.UI.GLUT.Polygon $
                 mapM_ (toVertex) pos
 
-display :: State -> DisplayCallback
+display :: MVar GameState -> DisplayCallback
 display state = do
    clear [ ColorBuffer ]
    -- resolve overloading, not needed in "real" programs
    let translatef = translate :: Vector3 GLfloat -> IO ()
-       scalef = scale :: GLfloat -> GLfloat -> GLfloat -> IO ()
    preservingMatrix $ do
       translatef (Vector3 (-1) 0 0)
-      x <- get (x state)
-      y <- get (y state)
       circle (0.5, 0.5)
       rectangle 0.5
       translatef (Vector3 1 0 0)
@@ -84,27 +82,29 @@ reshape size@(Size w h) = do
    let translatef = translate :: Vector3 GLfloat -> IO ()
    translatef (Vector3 0 0 (-5))
 
-keyboard :: State -> KeyboardMouseCallback
-keyboard state key Down _ _ = case key of
-   SpecialKey KeyRight -> update x 0.1
-   SpecialKey KeyLeft -> update x (-0.1)
-   SpecialKey KeyUp -> update y 0.1
-   SpecialKey KeyDown -> update y (-0.1)
-   Char '\27' -> exitWith ExitSuccess
-   _     -> return ()
-   where update joint inc = do
-            joint state $~ (+ inc)
+keyboard :: MVar GameState -> KeyboardMouseCallback
+keyboard state key Down _ _ = do
+   gamestate <- takeMVar state
+   case key of
+    SpecialKey KeyRight -> update (ledgePos gamestate) 0.1
+    SpecialKey KeyLeft -> update (ledgePos gamestate) (-0.1)
+    --SpecialKey KeyUp -> update y 0.1
+    --SpecialKey KeyDown -> update y (-0.1)
+    Char '\27' -> exitWith ExitSuccess
+    _     -> return ()
+   where update pos inc = do
+            putMVar state (GameState {ledgePos = pos + inc})
             postRedisplay Nothing
 keyboard _ _ _ _ _ = return ()
 
 main :: IO ()
 main = do
+   state <- makeState
    (progName, _args) <- getArgsAndInitialize
    initialDisplayMode $= [ DoubleBuffered, RGBMode ]
    initialWindowSize $= Size 500 500
    initialWindowPosition $= Position 100 100
    _ <- createWindow progName
-   state <- makeState
    myInit
    displayCallback $= display state
    reshapeCallback $= Just reshape
