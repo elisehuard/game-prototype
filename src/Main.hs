@@ -11,8 +11,9 @@
 
 import Data.IORef ( IORef, newIORef )
 import System.Exit ( exitWith, ExitCode(ExitSuccess) )
-import Graphics.UI.GLUT
+import Graphics.UI.GLUT hiding (position, scale)
 import Unsafe.Coerce
+import Physics.Hipmunk hiding (Position)
 
 data State = State { x, y :: IORef GLdouble }
 
