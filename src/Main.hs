@@ -16,18 +16,45 @@ import Unsafe.Coerce
 import Physics.Hipmunk hiding (Position)
 import Control.Concurrent.MVar
 
-data GameState = GameState { ledgePos :: CpFloat }
-data State = MVar { gameState :: GameState }
+data GameState = GameState { ledgePos :: IORef CpFloat, mainBall :: IORef Shape }
 
-makeState :: IO (MVar GameState)
-makeState = do let gamestate = GameState { ledgePos = 0.5 }
-               gamestate <- newMVar gamestate
-               return gamestate
+makeState :: Space -> IO GameState
+makeState space = do mBall <- ball space (0.05, 0.05) 0.3
+                     mainBall <- newIORef mBall
+                     ledgePos <- newIORef 0.5
+                     let gamestate = GameState { ledgePos = ledgePos, mainBall = mainBall }
+                     return gamestate
 
 myInit :: IO ()
 myInit = do
    clearColor $= Color4 1 1 1 1
    shadeModel $= Flat
+
+simpleInit :: Space -> IO ()
+simpleInit space = do
+    let title = "awesome game"
+    _ <- getArgsAndInitialize
+    gameModeCapabilities $= [ Where' GameModeBitsPerPlane IsEqualTo 24 ]
+    initialDisplayMode $= [ RGBMode, DoubleBuffered, WithDepthBuffer ]
+    
+    initialWindowSize $= Size 500 500
+    initialWindowPosition $= Position 100 100
+
+    _ <- createWindow title
+    actionOnWindowClose $= MainLoopReturns
+
+    clearColor $= Color4 1 1 1 1
+    shadeModel $= Flat
+    let scheduleTick = do
+            let fps = 60
+            addTimerCallback (1000 `div` fps) tick
+
+        tick = do
+            postRedisplay Nothing
+            step space subStepQuantum
+            scheduleTick
+
+    scheduleTick
 
 toVertex :: Num a => (a, a) -> IO ()
 toVertex (x,y) = vertex $ Vertex2 (unsafeCoerce x :: GLdouble) (unsafeCoerce y)
@@ -55,19 +82,63 @@ rectangle x1 = do
             renderPrimitive Graphics.UI.GLUT.Polygon $
                 mapM_ (toVertex) pos
 
-display :: MVar GameState -> DisplayCallback
-display state = do
+
+ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
+ball space pos rad = do
+    -- Body.
+    let m = 100 -- just setting a mass
+        vel = (0.0, 0.0)
+    b <- newBody m infinity
+    position b $= uncurry Vector pos
+    velocity b $= uncurry Vector vel
+    spaceAdd space b
+
+    -- Shape.
+    bshape <- newShape b (Circle $ unsafeCoerce rad) (Vector 0 0)
+    elasticity bshape    $= 0.9
+    friction bshape      $= 0.1
+    spaceAdd space bshape
+    return bshape
+
+-- newShape body_@(B b) (Polygon verts) off
+{-
+rectangleBody :: Space -> ((Double, Double), (Double, Double)) -> IO ()
+rectangleBody space ((x1,y1), (x2,y2)) = do
+    ground <- newBody infinity infinity
+    gshape <- newShape ground (LineSegment (Vector x1 y1) (Vector x2 y2) 0.01)
+               (Vector 0.0 0.0)
+    position ground   $= Vector 0.0 0.00
+    elasticity gshape $= 0.5
+    friction gshape   $= 0.8
+    spaceAdd space (Static gshape)
+
+border :: Space -> ((Double, Double), (Double, Double)) -> IO ()
+border space ((x1,y1), (x2,y2)) = do
+    ground <- newBody infinity infinity
+    gshape <- newShape ground (LineSegment (Vector x1 y1) (Vector x2 y2) 0.01)
+               (Vector 0.0 0.0)
+    position ground   $= Vector 0.0 0.00
+    elasticity gshape $= 0.5
+    friction gshape   $= 0.8
+    spaceAdd space (Static gshape)
+-}
+
+display :: GameState -> DisplayCallback
+display gamestate = do
    clear [ ColorBuffer ]
+   ledgePos <- get (ledgePos gamestate)
+   mainBall <- get (mainBall gamestate)
    -- resolve overloading, not needed in "real" programs
    let translatef = translate :: Vector3 GLfloat -> IO ()
    preservingMatrix $ do
       translatef (Vector3 (-1) 0 0)
-      circle (0.5, 0.5)
-      rectangle 0.5
-      translatef (Vector3 1 0 0)
       preservingMatrix $ do
          translatef (Vector3 1 0 0)
-         circle (x, y)
+         Vector x y <- get $ position (body mainBall)
+         putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
+         circle (unsafeCoerce x, unsafeCoerce y)
+         rectangle (unsafeCoerce ledgePos)
+      translatef (Vector3 1 0 0)
    swapBuffers
 
 reshape :: ReshapeCallback
@@ -82,18 +153,17 @@ reshape size@(Size w h) = do
    let translatef = translate :: Vector3 GLfloat -> IO ()
    translatef (Vector3 0 0 (-5))
 
-keyboard :: MVar GameState -> KeyboardMouseCallback
-keyboard state key Down _ _ = do
-   gamestate <- takeMVar state
+keyboard :: GameState -> KeyboardMouseCallback
+keyboard gamestate key Down _ _ =
    case key of
-    SpecialKey KeyRight -> update (ledgePos gamestate) 0.1
-    SpecialKey KeyLeft -> update (ledgePos gamestate) (-0.1)
+    SpecialKey KeyRight -> update ledgePos 0.1
+    SpecialKey KeyLeft -> update ledgePos (-0.1)
     --SpecialKey KeyUp -> update y 0.1
     --SpecialKey KeyDown -> update y (-0.1)
     Char '\27' -> exitWith ExitSuccess
     _     -> return ()
    where update pos inc = do
-            putMVar state (GameState {ledgePos = pos + inc})
+            pos gamestate $~ (+ inc)
             postRedisplay Nothing
 keyboard _ _ _ _ _ = return ()
 
