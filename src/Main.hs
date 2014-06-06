@@ -176,6 +176,8 @@ main = do
    initialWindowPosition $= Position 100 100
    _ <- createWindow progName
    myInit
+   -- display 
+   simpleInit space
    displayCallback $= display state
    reshapeCallback $= Just reshape
    keyboardMouseCallback $= Just (keyboard state)
