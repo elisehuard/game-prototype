@@ -1,3 +1,4 @@
+{-# language ScopedTypeVariables #-}
 {-
    Robot.hs (adapted from robot.c which is (c) Silicon Graphics, Inc.)
    Copyright (c) Sven Panne 2002-2005 <svenpanne@gmail.com>
@@ -167,15 +168,16 @@ keyboard gamestate key Down _ _ =
             postRedisplay Nothing
 keyboard _ _ _ _ _ = return ()
 
+type Seconds = CpFloat
+subStepQuantum :: Seconds = 0.01
+
 main :: IO ()
 main = do
-   state <- makeState
-   (progName, _args) <- getArgsAndInitialize
-   initialDisplayMode $= [ DoubleBuffered, RGBMode ]
-   initialWindowSize $= Size 500 500
-   initialWindowPosition $= Position 100 100
-   _ <- createWindow progName
-   myInit
+   -- physics
+   initChipmunk
+   space <- newSpace
+   gravity space $= Vector 0 (-1) 
+   state <- makeState space
    -- display 
    simpleInit space
    displayCallback $= display state
