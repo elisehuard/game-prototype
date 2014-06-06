@@ -26,11 +26,6 @@ makeState space = do mBall <- ball space (0.05, 0.05) 0.3
                      let gamestate = GameState { ledgePos = ledgePos, mainBall = mainBall }
                      return gamestate
 
-myInit :: IO ()
-myInit = do
-   clearColor $= Color4 1 1 1 1
-   shadeModel $= Flat
-
 simpleInit :: Space -> IO ()
 simpleInit space = do
     let title = "awesome game"
@@ -66,7 +61,7 @@ circle (x,y) = preservingMatrix $ do
     let poly  = 24
         ang p = p * 2 * pi / poly
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
-        r = 0.5
+        r = 0.3
     color $ Color3 1 0 (0 :: GLdouble)
     renderPrimitive Graphics.UI.GLUT.Polygon $
         mapM_ (toVertex) pos
@@ -78,12 +73,13 @@ circle (x,y) = preservingMatrix $ do
 rectangle :: GLdouble -> IO ()
 rectangle x1 = do
             color $ Color3 0 0 (0 :: GLdouble)
-            let y1 = -0.1  -- constant y
+            let y1 = -0.3 -- constant y
                 pos   = map (\(w, h) -> (x1 + w, y1 + h)) [(-0.5,0), (0.5,0), (0.5, -0.2), (-0.5, -0.2)]
             renderPrimitive Graphics.UI.GLUT.Polygon $
                 mapM_ (toVertex) pos
 
 
+-- ball/circle radius should be defined in one place
 ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
 ball space pos rad = do
     -- Body.
@@ -113,6 +109,8 @@ rectangleBody space ((x1,y1), (x2,y2)) = do
     friction gshape   $= 0.8
     spaceAdd space (Static gshape)
 
+-}
+
 border :: Space -> ((Double, Double), (Double, Double)) -> IO ()
 border space ((x1,y1), (x2,y2)) = do
     ground <- newBody infinity infinity
@@ -122,7 +120,12 @@ border space ((x1,y1), (x2,y2)) = do
     elasticity gshape $= 0.5
     friction gshape   $= 0.8
     spaceAdd space (Static gshape)
--}
+
+line :: ((Double, Double), (Double, Double)) -> IO ()
+line ((x1, y1), (x2, y2)) = do
+            color $ Color3 0 0 (0 :: GLdouble)
+            renderPrimitive Graphics.UI.GLUT.Lines $
+                mapM_ (toVertex) [(x1, y1), (x2, y2)]
 
 display :: GameState -> DisplayCallback
 display gamestate = do
@@ -132,14 +135,12 @@ display gamestate = do
    -- resolve overloading, not needed in "real" programs
    let translatef = translate :: Vector3 GLfloat -> IO ()
    preservingMatrix $ do
-      translatef (Vector3 (-1) 0 0)
-      preservingMatrix $ do
-         translatef (Vector3 1 0 0)
-         Vector x y <- get $ position (body mainBall)
-         putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
-         circle (unsafeCoerce x, unsafeCoerce y)
-         rectangle (unsafeCoerce ledgePos)
-      translatef (Vector3 1 0 0)
+        Vector x y <- get $ position (body mainBall)
+        putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
+        circle (unsafeCoerce x, unsafeCoerce y)
+        rectangle (unsafeCoerce ledgePos)
+        line ((-3.0, -3.0), (3.0, -3.0))
+         
    swapBuffers
 
 reshape :: ReshapeCallback
@@ -154,8 +155,8 @@ reshape size@(Size w h) = do
    let translatef = translate :: Vector3 GLfloat -> IO ()
    translatef (Vector3 0 0 (-5))
 
-keyboard :: GameState -> KeyboardMouseCallback
-keyboard gamestate key Down _ _ =
+keyboardMouse :: GameState -> KeyboardMouseCallback
+keyboardMouse gamestate key Down _ _ =
    case key of
     SpecialKey KeyRight -> update ledgePos 0.1
     SpecialKey KeyLeft -> update ledgePos (-0.1)
@@ -177,10 +178,11 @@ main = do
    initChipmunk
    space <- newSpace
    gravity space $= Vector 0 (-1) 
+   border space ((-3.0, -3.0), (3.0, -3.0))
    state <- makeState space
    -- display 
    simpleInit space
    displayCallback $= display state
    reshapeCallback $= Just reshape
-   keyboardMouseCallback $= Just (keyboard state)
+   keyboardMouseCallback $= Just (keyboardMouse state)
    mainLoop
