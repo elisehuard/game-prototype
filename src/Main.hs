@@ -17,13 +17,25 @@ import Unsafe.Coerce
 import Physics.Hipmunk hiding (Position)
 import Control.Concurrent.MVar
 
-data GameState = GameState { ledgePos :: IORef CpFloat, mainBall :: IORef Shape }
+data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, mainBall :: IORef Shape }
+
+-- constants
+
+type Seconds = CpFloat
+subStepQuantum :: Seconds = 0.01
+
+ballRadius :: CpFloat = 0.3
+ledgeHeight :: CpFloat = - 0.5
+
+-- constants end
 
 makeState :: Space -> IO GameState
-makeState space = do mBall <- ball space (0.05, 0.05) 0.3
+makeState space = do mBall <- ball space (0.0, 0.0) ballRadius 
                      mainBall <- newIORef mBall
-                     ledgePos <- newIORef 0.5
-                     let gamestate = GameState { ledgePos = ledgePos, mainBall = mainBall }
+                     ledgeShape <- rectangleShape space 0.0
+                     ledgePos <- newIORef 0.0
+                     ledge <- newIORef ledgeShape
+                     let gamestate = GameState { ledgePos = ledgePos, ledge = ledge, mainBall = mainBall }
                      return gamestate
 
 simpleInit :: Space -> IO ()
@@ -60,8 +72,8 @@ circle :: (GLdouble, GLdouble) -> IO ()
 circle (x,y) = preservingMatrix $ do
     let poly  = 24
         ang p = p * 2 * pi / poly
+        r = unsafeCoerce ballRadius
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
-        r = 0.3
     color $ Color3 1 0 (0 :: GLdouble)
     renderPrimitive Graphics.UI.GLUT.Polygon $
         mapM_ (toVertex) pos
@@ -69,21 +81,30 @@ circle (x,y) = preservingMatrix $ do
     renderPrimitive Graphics.UI.GLUT.LineLoop $
         mapM_ (toVertex) pos
 
+verticesAround :: CpFloat -> [(CpFloat, CpFloat)]
+verticesAround x = map (\(w, h) -> (x + w, ledgeHeight + h)) [(-0.5,0.1), (0.5,0.1), (0.5, -0.1), (-0.5, -0.1)]
+
 -- position of rectangle: it's centre top
-rectangle :: GLdouble -> IO ()
+rectangle :: CpFloat -> IO ()
 rectangle x1 = do
             color $ Color3 0 0 (0 :: GLdouble)
-            let y1 = -0.3 -- constant y
-                pos   = map (\(w, h) -> (x1 + w, y1 + h)) [(-0.5,0), (0.5,0), (0.5, -0.2), (-0.5, -0.2)]
+            let y1 = ledgeHeight -- constant y
+                vert = verticesAround x1
             renderPrimitive Graphics.UI.GLUT.Polygon $
-                mapM_ (toVertex) pos
+                mapM_ (toVertex) vert
+
+line :: ((Double, Double), (Double, Double)) -> IO ()
+line ((x1, y1), (x2, y2)) = do
+            color $ Color3 0 0 (0 :: GLdouble)
+            renderPrimitive Graphics.UI.GLUT.Lines $
+                mapM_ (toVertex) [(x1, y1), (x2, y2)]
 
 
 -- ball/circle radius should be defined in one place
 ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
 ball space pos rad = do
     -- Body.
-    let m = 100 -- just setting a mass
+    let m = 1000 -- just setting a mass
         vel = (0.0, 0.0)
     b <- newBody m infinity
     position b $= uncurry Vector pos
@@ -97,19 +118,24 @@ ball space pos rad = do
     spaceAdd space bshape
     return bshape
 
--- newShape body_@(B b) (Polygon verts) off
-{-
-rectangleBody :: Space -> ((Double, Double), (Double, Double)) -> IO ()
-rectangleBody space ((x1,y1), (x2,y2)) = do
-    ground <- newBody infinity infinity
-    gshape <- newShape ground (LineSegment (Vector x1 y1) (Vector x2 y2) 0.01)
-               (Vector 0.0 0.0)
-    position ground   $= Vector 0.0 0.00
+-- newShape body_@(B b) (Polygon verts) offset
+rectangleShape :: Space -> CpFloat -> IO Shape
+rectangleShape space x1 = do
+    ground <- newBody infinity infinity -- 'rogue body'
+    let vertices = map (\(x,y) -> Vector x y) $ verticesAround x1
+    gshape <- newShape ground (Physics.Hipmunk.Polygon vertices) (Vector 0.0 0.0)
+    position ground   $= Vector x1 0.0 -- also kind of offset from shape - body?
     elasticity gshape $= 0.5
     friction gshape   $= 0.8
-    spaceAdd space (Static gshape)
+    --spaceAdd space (Static gshape) -- rogue so not adding to space
+    spaceAdd space gshape -- rogue so not adding to space
+    return gshape
 
--}
+updateRectangleBody :: GameState -> CpFloat -> IO ()
+updateRectangleBody state inc = do pong <- get (ledge state)
+                                   oldx <- get (ledgePos state)
+                                   let newpos = (Vector (oldx + inc) ledgeHeight)
+                                   position (body pong) $= newpos
 
 border :: Space -> ((Double, Double), (Double, Double)) -> IO ()
 border space ((x1,y1), (x2,y2)) = do
@@ -121,12 +147,6 @@ border space ((x1,y1), (x2,y2)) = do
     friction gshape   $= 0.8
     spaceAdd space (Static gshape)
 
-line :: ((Double, Double), (Double, Double)) -> IO ()
-line ((x1, y1), (x2, y2)) = do
-            color $ Color3 0 0 (0 :: GLdouble)
-            renderPrimitive Graphics.UI.GLUT.Lines $
-                mapM_ (toVertex) [(x1, y1), (x2, y2)]
-
 display :: GameState -> DisplayCallback
 display gamestate = do
    clear [ ColorBuffer ]
@@ -136,7 +156,7 @@ display gamestate = do
    let translatef = translate :: Vector3 GLfloat -> IO ()
    preservingMatrix $ do
         Vector x y <- get $ position (body mainBall)
-        putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
+        --putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
         circle (unsafeCoerce x, unsafeCoerce y)
         rectangle (unsafeCoerce ledgePos)
         line ((-3.0, -3.0), (3.0, -3.0))
@@ -155,8 +175,8 @@ reshape size@(Size w h) = do
    let translatef = translate :: Vector3 GLfloat -> IO ()
    translatef (Vector3 0 0 (-5))
 
-keyboardMouse :: GameState -> KeyboardMouseCallback
-keyboardMouse gamestate key Down _ _ =
+keyboardMouse :: GameState -> Space -> KeyboardMouseCallback
+keyboardMouse gamestate space key Down _ _ =
    case key of
     SpecialKey KeyRight -> update ledgePos 0.1
     SpecialKey KeyLeft -> update ledgePos (-0.1)
@@ -166,11 +186,9 @@ keyboardMouse gamestate key Down _ _ =
     _     -> return ()
    where update pos inc = do
             pos gamestate $~ (+ inc)
+            updateRectangleBody gamestate inc
             postRedisplay Nothing
-keyboard _ _ _ _ _ = return ()
-
-type Seconds = CpFloat
-subStepQuantum :: Seconds = 0.01
+keyboardMouse _ _ _ _ _ _ = return ()
 
 main :: IO ()
 main = do
@@ -184,5 +202,5 @@ main = do
    simpleInit space
    displayCallback $= display state
    reshapeCallback $= Just reshape
-   keyboardMouseCallback $= Just (keyboardMouse state)
+   keyboardMouseCallback $= Just (keyboardMouse state space)
    mainLoop
