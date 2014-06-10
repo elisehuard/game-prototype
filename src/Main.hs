@@ -11,11 +11,16 @@
 -}
 
 import Data.IORef ( IORef, newIORef )
-import System.Exit ( exitWith, ExitCode(ExitSuccess) )
+import System.Exit ( exitWith, ExitCode(ExitSuccess), exitFailure)
 import Graphics.UI.GLUT hiding (position, scale)
 import Unsafe.Coerce
 import Physics.Hipmunk hiding (Position)
 import Control.Concurrent.MVar
+import Sound.ALUT hiding (Static)
+import Data.List (intersperse)
+import Control.Monad (when, unless)
+import Control.Monad.IO.Class (liftIO)
+import System.IO ( hPutStrLn, stderr )
 
 data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, mainBall :: IORef Shape }
 
@@ -105,7 +110,7 @@ ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
 ball space pos rad = do
     -- Body.
     let m = 1000 -- just setting a mass
-        vel = (0.0, 0.0)
+        vel = (0.0, -0.2)
     b <- newBody m infinity
     position b $= uncurry Vector pos
     velocity b $= uncurry Vector vel
@@ -113,7 +118,7 @@ ball space pos rad = do
 
     -- Shape.
     bshape <- newShape b (Circle $ unsafeCoerce rad) (Vector 0 0)
-    elasticity bshape    $= 0.9
+    elasticity bshape    $= 2.0
     friction bshape      $= 0.1
     spaceAdd space bshape
     return bshape
@@ -190,13 +195,47 @@ keyboardMouse gamestate space key Down _ _ =
             postRedisplay Nothing
 keyboardMouse _ _ _ _ _ _ = return ()
 
+-- Callback monad
+-- playSound :: String -> IO ()
+playSound fileName = do
+        -- Create an AL buffer from the given sound file.
+        buf <- createBuffer (File fileName)
+        -- Generate a single source, attach the buffer to it and start playing.
+        source <- genObjectName
+        buffer source $= Just buf
+        play [source]
+        -- Normally nothing should go wrong above, but one never knows...
+        errs <- get alErrors
+        unless (null errs) $ do
+            hPutStrLn stderr (concat (intersperse "," [ d | ALError _ d <- errs ]))
+            --exitFailure
+        -- Check every 0.1 seconds if the sound is still playing.
+        let waitWhilePlaying = do
+                sleep 0.1
+                state <- get (sourceState source)
+                when (state == Playing) $
+                    waitWhilePlaying
+        waitWhilePlaying
+        return True
+
 main :: IO ()
 main = do
+   {-
+   withProgNameAndArgs runALUT $ \progName args -> do
+     playSound "sounds/pacman_intro.wav"
+   -}
    -- physics
    initChipmunk
    space <- newSpace
    gravity space $= Vector 0 (-1) 
    border space ((-3.0, -3.0), (3.0, -3.0))
+   let collHandler = liftIO $ withProgNameAndArgs runALUT $ \progName args -> do
+                                playSound "sounds/file1.wav"
+   setDefaultCollisionHandler space $
+      Handler {beginHandler     = Just collHandler
+              ,preSolveHandler  = Nothing
+              ,postSolveHandler = Nothing
+              ,separateHandler  = Nothing}
    state <- makeState space
    -- display 
    simpleInit space
