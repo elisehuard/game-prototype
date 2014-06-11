@@ -86,15 +86,15 @@ circle (x,y) = preservingMatrix $ do
     renderPrimitive Graphics.UI.GLUT.LineLoop $
         mapM_ (toVertex) pos
 
-verticesAround :: CpFloat -> [(CpFloat, CpFloat)]
-verticesAround x = map (\(w, h) -> (x + w, ledgeHeight + h)) [(-0.5,0.1), (0.5,0.1), (0.5, -0.1), (-0.5, -0.1)]
+rectDims :: [(CpFloat, CpFloat)]
+rectDims = [(-0.5,0.1), (0.5,0.1), (0.5, -0.1), (-0.5, -0.1)]
 
 -- position of rectangle: it's centre top
 rectangle :: CpFloat -> IO ()
 rectangle x1 = do
             color $ Color3 0 0 (0 :: GLdouble)
             let y1 = ledgeHeight -- constant y
-                vert = verticesAround x1
+                vert = map (\(w, h) -> (x1 + w, ledgeHeight + h)) rectDims
             renderPrimitive Graphics.UI.GLUT.Polygon $
                 mapM_ (toVertex) vert
 
@@ -126,10 +126,11 @@ ball space pos rad = do
 -- newShape body_@(B b) (Polygon verts) offset
 rectangleShape :: Space -> CpFloat -> IO Shape
 rectangleShape space x1 = do
-    ground <- newBody infinity infinity -- 'rogue body'
-    let vertices = map (\(x,y) -> Vector x y) $ verticesAround x1
-    gshape <- newShape ground (Physics.Hipmunk.Polygon vertices) (Vector 0.0 0.0)
-    position ground   $= Vector x1 0.0 -- also kind of offset from shape - body?
+    -- ground <- newBody infinity infinity -- 'rogue body'
+    let vertices = map (\(x, y) -> Vector x y) rectDims
+    b <- newBody infinity $ momentForPoly infinity vertices 0
+    gshape <- newShape b (Physics.Hipmunk.Polygon vertices) (Vector 0.0 0.0)
+    position b   $= Vector x1 ledgeHeight
     elasticity gshape $= 0.5
     friction gshape   $= 0.8
     --spaceAdd space (Static gshape) -- rogue so not adding to space
