@@ -16,6 +16,7 @@ import Graphics.UI.GLUT hiding (position, scale)
 import Unsafe.Coerce
 import Physics.Hipmunk hiding (Position)
 import Control.Concurrent.MVar
+import Control.Concurrent (forkOS)
 import Sound.ALUT hiding (Static)
 import Data.List (intersperse)
 import Control.Monad (when, unless)
@@ -195,12 +196,50 @@ keyboardMouse gamestate space key Down _ _ =
             updateRectangleBody gamestate inc
             postRedisplay Nothing
 keyboardMouse _ _ _ _ _ _ = return ()
+stopAll = do
+   exitWith ExitSuccess
 
--- Callback monad
--- playSound :: String -> IO ()
-playSound fileName = do
-        -- Create an AL buffer from the given sound file.
-        buf <- createBuffer (File fileName)
+-- sound
+-- http://chimera.labs.oreilly.com/books/1230000000929/ch07.html#sec_conc-logger
+data SoundService = SoundService (MVar SoundCommand)  -- handle to sound service
+data SoundCommand = Play Sound | Stop (MVar ())
+data Sound = Pow
+
+initSoundService :: IO SoundService
+initSoundService = do
+           m <- newEmptyMVar
+           let s = SoundService m
+           forkOS (soundService s) -- forkIO might not be enough, might need forkOS
+           return s
+
+soundService :: SoundService -> IO ()
+soundService (SoundService s) = do
+  withProgNameAndArgs runALUT $ \progName args -> do
+     -- Create an AL buffer from the given sound file.
+     pow <- createBuffer (File "sounds/jump.wav")
+     loop pow
+    where
+        loop b = do
+                cmd <- takeMVar s
+                case cmd of
+                    Play Pow -> do
+                        playSound b
+                        loop b
+                    Stop x -> do
+                        putStrLn "sound: stop"
+                        putMVar x () 
+
+sendPlay :: SoundService -> Sound -> IO Bool
+sendPlay (SoundService s) f = do putMVar s (Play f)
+                                 return True
+
+stopSoundService :: SoundService -> IO ()
+stopSoundService (SoundService s) = do
+            m <- newEmptyMVar
+            putMVar s (Stop m)
+            takeMVar m
+
+playSound buf = do
         -- Generate a single source, attach the buffer to it and start playing.
         source <- genObjectName
         buffer source $= Just buf
@@ -221,17 +260,14 @@ playSound fileName = do
 
 main :: IO ()
 main = do
-   {-
-   withProgNameAndArgs runALUT $ \progName args -> do
-     playSound "sounds/pacman_intro.wav"
-   -}
+   -- sound
+   s <- initSoundService
    -- physics
    initChipmunk
    space <- newSpace
    gravity space $= Vector 0 (-1) 
    border space ((-3.0, -3.0), (3.0, -3.0))
-   let collHandler = liftIO $ withProgNameAndArgs runALUT $ \progName args -> do
-                                playSound "sounds/file1.wav"
+   let collHandler = liftIO $ sendPlay s Pow
    setDefaultCollisionHandler space $
       Handler {beginHandler     = Just collHandler
               ,preSolveHandler  = Nothing
@@ -242,5 +278,5 @@ main = do
    simpleInit space
    displayCallback $= display state
    reshapeCallback $= Just reshape
-   keyboardMouseCallback $= Just (keyboardMouse state space)
+   keyboardMouseCallback $= Just (keyboardMouse state s space)
    mainLoop
