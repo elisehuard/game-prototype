@@ -209,7 +209,7 @@ initSoundService :: IO SoundService
 initSoundService = do
            m <- newEmptyMVar
            let s = SoundService m
-           forkOS (soundService s) -- forkIO might not be enough, might need forkOS
+           __ <- forkOS (soundService s) -- forkIO might not be enough, might need forkOS
            return s
 
 soundService :: SoundService -> IO ()
