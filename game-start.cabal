@@ -19,7 +19,7 @@ cabal-version:       >=1.10
 executable game-start
   HS-Source-Dirs:      src
   main-is:             Main.hs
-  ghc-options: -Wall -O2
+  ghc-options: -Wall -O2 -threaded
   -- other-modules:
   -- other-extensions:
   other-extensions:    OverloadedStrings, TypeOperators, NoMonomorphismRestriction, ExistentialQuantification, PackageImports, DoRec, ParallelListComp, DataKinds, NamedFieldPuns
