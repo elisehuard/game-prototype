@@ -11,6 +11,7 @@
 -}
 
 import Data.IORef ( IORef, newIORef )
+import Data.Maybe (isJust)
 import System.Exit ( exitWith, ExitCode(ExitSuccess), exitFailure)
 import Graphics.UI.GLUT hiding (position, scale)
 import Unsafe.Coerce
@@ -22,6 +23,8 @@ import Data.List (intersperse)
 import Control.Monad (when, unless)
 import Control.Monad.IO.Class (liftIO)
 import System.IO ( hPutStrLn, stderr )
+import Foreign ( withArray )
+import Data.Bits ( (.&.) )
 
 data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, mainBall :: IORef Shape }
 
@@ -30,7 +33,7 @@ data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, ma
 type Seconds = CpFloat
 subStepQuantum :: Seconds = 0.01
 
-ballRadius :: CpFloat = 0.3
+ballRadius :: CpFloat = 0.5
 ledgeHeight :: CpFloat = - 0.5
 
 -- constants end
@@ -44,12 +47,30 @@ makeState space = do mBall <- ball space (0.0, 0.0) ballRadius
                      let gamestate = GameState { ledgePos = ledgePos, ledge = ledge, mainBall = mainBall }
                      return gamestate
 
-simpleInit :: Space -> IO ()
-simpleInit space = do
+checkImageSize :: TextureSize2D
+checkImageSize = TextureSize2D 64 64
+
+withCheckImage :: TextureSize2D -> GLsizei -> (GLubyte -> (Color4 GLubyte))
+               -> (PixelData (Color4 GLubyte) -> IO ()) -> IO ()
+withCheckImage (TextureSize2D w h) n f act =
+
+   -- list comprehension pixels w h, returning list with f = input 
+   -- .&. bitwise and with 0x08 = 0100
+   withArray [ f c |
+               i <- [ 0 .. w - 1 ],
+               j <- [ 0 .. h - 1 ],
+               let c | (i .&. n) == (j .&. n) = 0
+                     | otherwise              = 255 ] $
+   act . PixelData RGBA UnsignedByte
+
+simpleInit :: IO ()
+simpleInit = do
     let title = "awesome game"
     _ <- getArgsAndInitialize
-    gameModeCapabilities $= [ Where' GameModeBitsPerPlane IsEqualTo 24 ]
+    -- gameModeCapabilities $= [ Where' GameModeBitsPerPlane IsEqualTo 24 ]
+    -- depthFunc $= Just Less
     initialDisplayMode $= [ RGBMode, DoubleBuffered, WithDepthBuffer ]
+    rowAlignment Unpack $= 1 -- http://www.khronos.org/opengles/sdk/docs/man/xhtml/glPixelStorei.xml
     
     initialWindowSize $= Size 500 500
     initialWindowPosition $= Position 100 100
@@ -58,7 +79,26 @@ simpleInit space = do
     actionOnWindowClose $= MainLoopReturns
 
     clearColor $= Color4 1 1 1 1
+
     shadeModel $= Flat
+
+loadTexture :: IO (Maybe TextureObject)
+loadTexture = do
+    exts <- get glExtensions
+    mbTexName <- if "GL_EXT_texture_object" `elem` exts
+                   then fmap Just genObjectName
+                   else return Nothing
+    when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
+    textureBinding Texture2D $= mbTexName
+    textureWrapMode Texture2D S $= (Repeated, ClampToEdge)
+    textureWrapMode Texture2D T $= (Repeated, ClampToEdge)
+    textureFilter Texture2D $= ((Nearest, Nothing), Nearest)
+    withCheckImage checkImageSize 0x08 (\c -> Color4 c c c 255) $
+      texImage2D Texture2D NoProxy 0  RGBA' checkImageSize 0
+    texture Texture2D $= Enabled
+    return mbTexName
+
+framerate space = do
     let scheduleTick = do
             let fps = 60
             addTimerCallback (1000 `div` fps) tick
@@ -73,6 +113,11 @@ simpleInit space = do
 toVertex :: Num a => (a, a) -> IO ()
 toVertex (x,y) = vertex $ Vertex2 (unsafeCoerce x :: GLdouble) (unsafeCoerce y)
 
+toVertexAndTexture :: Num a => (a, a) -> IO ()
+toVertexAndTexture (x, y) = do toVertex (x, y);
+                               texCoord2f (TexCoord2 (unsafeCoerce x) (unsafeCoerce y))
+                               where texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
+
 -- circle around position
 circle :: (GLdouble, GLdouble) -> IO ()
 circle (x,y) = preservingMatrix $ do
@@ -80,15 +125,16 @@ circle (x,y) = preservingMatrix $ do
         ang p = p * 2 * pi / poly
         r = unsafeCoerce ballRadius
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
-    color $ Color3 1 0 (0 :: GLdouble)
+    -- we now want to use the texture
+    -- color $ Color3 1 0 (0 :: GLdouble)
     renderPrimitive Graphics.UI.GLUT.Polygon $
-        mapM_ (toVertex) pos
-    color $ Color3 0 0 (0 :: GLdouble)
+        mapM_ (toVertexAndTexture) pos
+    -- color $ Color3 0 0 (0 :: GLdouble)
     renderPrimitive Graphics.UI.GLUT.LineLoop $
         mapM_ (toVertex) pos
 
 rectDims :: [(CpFloat, CpFloat)]
-rectDims = [(-0.5,0.1), (0.5,0.1), (0.5, -0.1), (-0.5, -0.1)]
+rectDims = [(-1.0,0.2), (1.0,0.2), (1.0, -0.2), (-1.0, -0.2)]
 
 -- position of rectangle: it's centre top
 rectangle :: CpFloat -> IO ()
@@ -110,7 +156,7 @@ line ((x1, y1), (x2, y2)) = do
 ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
 ball space pos rad = do
     -- Body.
-    let m = 1000 -- just setting a mass
+    let m = 10000 -- just setting a mass
         vel = (0.0, -0.2)
     b <- newBody m infinity
     position b $= uncurry Vector pos
@@ -154,20 +200,25 @@ border space ((x1,y1), (x2,y2)) = do
     friction gshape   $= 0.8
     spaceAdd space (Static gshape)
 
-display :: GameState -> DisplayCallback
-display gamestate = do
-   clear [ ColorBuffer ]
+display :: GameState -> Maybe TextureObject -> DisplayCallback
+display gamestate mbTexName = do
+   clear [ ColorBuffer, DepthBuffer ]
    ledgePos <- get (ledgePos gamestate)
    mainBall <- get (mainBall gamestate)
-   -- resolve overloading, not needed in "real" programs
-   let translatef = translate :: Vector3 GLfloat -> IO ()
-   preservingMatrix $ do
-        Vector x y <- get $ position (body mainBall)
-        --putStrLn $ "position varied? " ++ (show x) ++ " " ++ (show y)
-        circle (unsafeCoerce x, unsafeCoerce y)
-        rectangle (unsafeCoerce ledgePos)
-        line ((-3.0, -3.0), (3.0, -3.0))
-         
+
+   Vector x y <- get $ position (body mainBall)
+
+   -- draw ball
+   texture Texture2D $= Enabled
+   textureFunction $= Decal
+   when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
+   circle (unsafeCoerce x, unsafeCoerce y)
+   texture Texture2D $= Disabled
+
+   rectangle (unsafeCoerce ledgePos) -- draw ledge
+
+   line ((-3.0, -3.0), (3.0, -3.0)) -- draw border
+
    swapBuffers
 
 reshape :: ReshapeCallback
@@ -180,22 +231,23 @@ reshape size@(Size w h) = do
    loadIdentity
    -- resolve overloading, not needed in "real" programs
    let translatef = translate :: Vector3 GLfloat -> IO ()
-   translatef (Vector3 0 0 (-5))
+   translatef (Vector3 0 0 (-5)) -- this lifts us up to see the x-y plane
 
-keyboardMouse :: GameState -> Space -> KeyboardMouseCallback
-keyboardMouse gamestate space key Down _ _ =
+keyboardMouse :: GameState -> SoundService -> Space -> KeyboardMouseCallback
+keyboardMouse gamestate soundService space key Down _ _ =
    case key of
     SpecialKey KeyRight -> update ledgePos 0.1
     SpecialKey KeyLeft -> update ledgePos (-0.1)
     --SpecialKey KeyUp -> update y 0.1
     --SpecialKey KeyDown -> update y (-0.1)
-    Char '\27' -> exitWith ExitSuccess
+    Char '\27' -> stopAll
     _     -> return ()
    where update pos inc = do
             pos gamestate $~ (+ inc)
             updateRectangleBody gamestate inc
             postRedisplay Nothing
-keyboardMouse _ _ _ _ _ _ = return ()
+keyboardMouse _ _ _ _ _ _ _ = return ()
+
 stopAll = do
    exitWith ExitSuccess
 
@@ -275,8 +327,10 @@ main = do
               ,separateHandler  = Nothing}
    state <- makeState space
    -- display 
-   simpleInit space
-   displayCallback $= display state
+   simpleInit
+   texname <- loadTexture
+   framerate space
+   displayCallback $= display state texname
    reshapeCallback $= Just reshape
    keyboardMouseCallback $= Just (keyboardMouse state s space)
    mainLoop
