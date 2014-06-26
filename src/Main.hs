@@ -33,16 +33,16 @@ data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, ma
 type Seconds = CpFloat
 subStepQuantum :: Seconds = 0.01
 
-ballRadius :: CpFloat = 0.5
-ledgeHeight :: CpFloat = - 0.5
+ballRadius :: CpFloat = 50
+ledgeHeight :: CpFloat = 150
 
 -- constants end
 
 makeState :: Space -> IO GameState
-makeState space = do mBall <- ball space (0.0, 0.0) ballRadius 
+makeState space = do mBall <- ball space (200, 200) ballRadius 
                      mainBall <- newIORef mBall
-                     ledgeShape <- rectangleShape space 0.0
-                     ledgePos <- newIORef 0.0
+                     ledgeShape <- rectangleShape space 200
+                     ledgePos <- newIORef 200
                      ledge <- newIORef ledgeShape
                      let gamestate = GameState { ledgePos = ledgePos, ledge = ledge, mainBall = mainBall }
                      return gamestate
@@ -134,7 +134,10 @@ circle (x,y) = preservingMatrix $ do
         mapM_ (toVertex) pos
 
 rectDims :: [(CpFloat, CpFloat)]
-rectDims = [(-1.0,0.2), (1.0,0.2), (1.0, -0.2), (-1.0, -0.2)]
+rectDims = [((-50.0), 10.0), (50.0, 10.0), (50.0, (-10.0)), ((-50.0), (-10.0))]
+
+borderPos :: ((CpFloat, CpFloat), (CpFloat, CpFloat))
+borderPos = ((0.0, 0.0), (500.0, 0.0)) -- draw border
 
 -- position of rectangle: it's centre top
 rectangle :: CpFloat -> IO ()
@@ -217,12 +220,18 @@ display gamestate mbTexName = do
 
    rectangle (unsafeCoerce ledgePos) -- draw ledge
 
-   line ((-3.0, -3.0), (3.0, -3.0)) -- draw border
+   line borderPos
 
    swapBuffers
 
 reshape :: ReshapeCallback
 reshape size@(Size w h) = do
+   viewport $= (Position 0 0, size)
+   matrixMode $= Projection
+   loadIdentity
+   ortho 0 (fromIntegral w) 0 (fromIntegral h) (-1) 1
+   matrixMode $= Modelview 0
+{-
    viewport $= (Position 0 0, size)
    matrixMode $= Projection
    loadIdentity
@@ -232,12 +241,13 @@ reshape size@(Size w h) = do
    -- resolve overloading, not needed in "real" programs
    let translatef = translate :: Vector3 GLfloat -> IO ()
    translatef (Vector3 0 0 (-5)) -- this lifts us up to see the x-y plane
+-}
 
 keyboardMouse :: GameState -> SoundService -> Space -> KeyboardMouseCallback
 keyboardMouse gamestate soundService space key Down _ _ =
    case key of
-    SpecialKey KeyRight -> update ledgePos 0.1
-    SpecialKey KeyLeft -> update ledgePos (-0.1)
+    SpecialKey KeyRight -> update ledgePos 1.0
+    SpecialKey KeyLeft -> update ledgePos (-1.0)
     --SpecialKey KeyUp -> update y 0.1
     --SpecialKey KeyDown -> update y (-0.1)
     Char '\27' -> stopAll
@@ -318,7 +328,7 @@ main = do
    initChipmunk
    space <- newSpace
    gravity space $= Vector 0 (-1) 
-   border space ((-3.0, -3.0), (3.0, -3.0))
+   border space borderPos
    let collHandler = liftIO $ sendPlay s Pow
    setDefaultCollisionHandler space $
       Handler {beginHandler     = Just collHandler
