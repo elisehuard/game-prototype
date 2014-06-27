@@ -58,8 +58,7 @@ checkImageSize = TextureSize2D 64 64
 withCheckImage :: TextureSize2D -> GLsizei -> (GLubyte -> (Color4 GLubyte))
                -> (PixelData (Color4 GLubyte) -> IO ()) -> IO ()
 withCheckImage (TextureSize2D w h) n f act =
-
-   -- list comprehension pixels w h, returning list with f = input 
+   -- list comprehension pixels w h, returning list with f = (\c -> Color4 c c c 255)
    -- .&. bitwise and with 0x08 = 0100
    withArray [ f c |
                i <- [ 0 .. w - 1 ],
@@ -94,13 +93,16 @@ loadTexture = do
                    then fmap Just genObjectName
                    else return Nothing
     when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
-    textureBinding Texture2D $= mbTexName
-    textureWrapMode Texture2D S $= (Repeated, ClampToEdge)
+    textureFunction $= Replace
+    textureFilter Texture2D $= ((Nearest, Nothing), Nearest) -- nearest or linear
+    textureWrapMode Texture2D S $= (Repeated, ClampToEdge) -- or ClampToEdge if bigger than shape. if clam s and t from 0 to 1, if repeat then depends on repeats
     textureWrapMode Texture2D T $= (Repeated, ClampToEdge)
-    textureFilter Texture2D $= ((Nearest, Nothing), Nearest)
     withCheckImage checkImageSize 0x08 (\c -> Color4 c c c 255) $
       texImage2D Texture2D NoProxy 0  RGBA' checkImageSize 0
-    texture Texture2D $= Enabled
+    {-
+    Right img <- loadImage "images/smiley.png"
+    tex <- compileTexture2DRGBAF False True img
+    -}
     return mbTexName
 
 framerate space = do
@@ -118,10 +120,20 @@ framerate space = do
 toVertex :: Num a => (a, a) -> IO ()
 toVertex (x,y) = vertex $ Vertex2 (unsafeCoerce x :: GLdouble) (unsafeCoerce y)
 
-toVertexAndTexture :: Num a => (a, a) -> IO ()
-toVertexAndTexture (x, y) = do toVertex (x, y);
-                               texCoord2f (TexCoord2 (unsafeCoerce x) (unsafeCoerce y))
-                               where texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
+-- texture
+-- Typical values in glTexCoord2f are 0.0->1.0
+-- http://stackoverflow.com/questions/8762826/texture-mapping-a-circle-made-using-gl-polygon
+toTexture (x,y) = texCoord2f (TexCoord2 (unsafeCoerce x) (unsafeCoerce y))
+                where texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
+
+
+toVertexAndTexture (x,y) r angle = do toVertex (x + cos(angle)*r, y + sin(angle)*r)
+                                      toTexture (0.5 + cos(angle)*0.5, 0.5 + sin(angle)*0.5)
+
+toVandT2 (x,y) (w,h,s,t) = do toVertex (x + w, y + h)
+                              toTexture (s,t)
+
+                              
 
 -- circle around position
 circle :: (GLdouble, GLdouble) -> IO ()
@@ -131,11 +143,11 @@ circle (x,y) = preservingMatrix $ do
         r = unsafeCoerce ballRadius
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
     -- we now want to use the texture
-    -- color $ Color3 1 0 (0 :: GLdouble)
-    renderPrimitive Graphics.UI.GLUT.Polygon $
-        mapM_ (toVertexAndTexture) pos
-    -- color $ Color3 0 0 (0 :: GLdouble)
-    renderPrimitive Graphics.UI.GLUT.LineLoop $
+    color $ Color3 1 1 (1 :: GLdouble)
+    renderPrimitive Graphics.UI.GLUT.Polygon $ do
+        mapM_ (toVertexAndTexture (x,y) r . ang) [1,2..poly]
+    color $ Color3 0 0 (0 :: GLdouble)
+    renderPrimitive Graphics.UI.GLUT.LineLoop $ do
         mapM_ (toVertex) pos
 
 rectDims :: [(CpFloat, CpFloat)]
@@ -273,9 +285,9 @@ display gamestate mbTexName = do
 
    Vector x y <- get $ position (body mainBall)
 
-   -- draw ball
+   -- draw ball with texture
    texture Texture2D $= Enabled
-   textureFunction $= Decal
+   textureFunction $= Replace
    when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
    circle (unsafeCoerce x, unsafeCoerce y)
    texture Texture2D $= Disabled
@@ -407,9 +419,9 @@ main = do
    state <- makeState space
    -- display 
    simpleInit
-   texname <- loadTexture
+   mbTexName <- loadTexture
    framerate space
-   displayCallback $= display state texname
+   displayCallback $= display state mbTexName
    reshapeCallback $= Just reshape
    keyboardMouseCallback $= Just (keyboardMouse state s space)
    mainLoop
