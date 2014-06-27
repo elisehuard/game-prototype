@@ -35,7 +35,8 @@ data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, ma
 -- constants
 
 type Seconds = CpFloat
-subStepQuantum :: Seconds = 0.01
+subStepQuantum :: Seconds = 0.1
+--subStepQuantum :: Seconds = 0.01
 
 ballRadius :: CpFloat = 50
 ledgeHeight :: CpFloat = 150
@@ -163,7 +164,7 @@ line ((x1, y1), (x2, y2)) = do
 ball :: Space -> (CpFloat, CpFloat) -> Double -> IO Shape
 ball space pos rad = do
     -- Body.
-    let m = 10000 -- just setting a mass
+    let m = 1000000 -- just setting a mass
         vel = (0.0, -0.2)
     b <- newBody m infinity
     position b $= uncurry Vector pos
