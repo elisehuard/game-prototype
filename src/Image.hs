@@ -34,6 +34,7 @@ import Graphics.Rendering.OpenGL.Raw.Core32 (
     gl_TEXTURE_BASE_LEVEL,
     glBindTexture
   )
+import Graphics.UI.GLUT hiding (position, scale)
 
 data TextureData
     = TextureData
@@ -41,20 +42,22 @@ data TextureData
     }
 
 -- we won't need mipmaps for 3d obvs
-compileTexture2DRGBAF :: Bool -> Bool -> Bitmap Word8 -> IO TextureData
+compileTexture2DRGBAF :: Bool -> Bool -> Bitmap Word8 -> IO (Maybe TextureObject)
 compileTexture2DRGBAF isMip isClamped bitmap = do
     glPixelStorei gl_UNPACK_ALIGNMENT 1
-    to <- alloca $! \pto -> glGenTextures 1 pto >> peek pto
-    glBindTexture gl_TEXTURE_2D to
+    -- to <- alloca $! \pto -> glGenTextures 1 pto >> peek pto
+    mbTexName <- fmap Just genObjectName
+    textureBinding Texture2D $= mbTexName
+    -- glBindTexture gl_TEXTURE_2D to
     let (width,height) = bitmapSize bitmap
         wrapMode = case isClamped of
-            True    -> gl_CLAMP_TO_EDGE
-            False   -> gl_REPEAT
+            True    -> ClampToEdge
+            False   -> Repeat
         (minFilter,maxLevel) = case isMip of
             False   -> (gl_LINEAR,0)
             True    -> (gl_LINEAR_MIPMAP_LINEAR, floor $ log (fromIntegral $ max width height) / log 2)
-    glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_S $ fromIntegral wrapMode
-    glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral wrapMode
+    textureWrapMode Texture2D S $= (Repeated, wrapMode) -- or ClampToEdge if bigger than shape. if clam s and t from 0 to 1, if repeat then depends on repeats
+    textureWrapMode Texture2D T $= (Repeated, wrapMode)
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_MIN_FILTER $ fromIntegral minFilter
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_MAG_FILTER $ fromIntegral gl_LINEAR
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_BASE_LEVEL 0
@@ -69,4 +72,4 @@ compileTexture2DRGBAF isMip isClamped bitmap = do
     when isMip $ glGenerateMipmap gl_TEXTURE_2D
     -- for texture data into texture object
     -- glTexImage2D(m_textureTarget, 0, GL_RGBA, m_pImage->columns(), m_pImage->rows(), 0, GL_RGBA, GL_UNSIGNED_BYTE, m_blob.data());
-    return $ TextureData to
+    return mbTexName
