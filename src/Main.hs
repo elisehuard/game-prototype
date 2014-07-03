@@ -29,6 +29,8 @@ import Foreign.C.String ( castCharToCChar )
 import Data.Bits ( (.&.) )
 import Codec.Image.STB
 import Image
+import GHC.Float
+import Foreign.C.Types (CFloat(..), CDouble(..))
 
 data GameState = GameState { ledgePos :: IORef CpFloat, ledge :: IORef Shape, mainBall :: IORef Shape }
 
@@ -117,30 +119,44 @@ framerate space = do
 
     scheduleTick
 
-toVertex :: Num a => (a, a) -> IO ()
-toVertex (x,y) = vertex $ Vertex2 (unsafeCoerce x :: GLdouble) (unsafeCoerce y)
+toVertex :: (GLdouble, GLdouble) -> IO ()
+toVertex (x,y) = vertex $ Vertex2 x y
+
+cDoubleTuple :: (Double, Double) -> (CDouble, CDouble)
+cDoubleTuple (x, y) = (unsafeCoerce x, unsafeCoerce y)
+
 
 -- texture
 -- Typical values in glTexCoord2f are 0.0->1.0
 -- http://stackoverflow.com/questions/8762826/texture-mapping-a-circle-made-using-gl-polygon
-toTexture (x,y) = texCoord2f (TexCoord2 (unsafeCoerce x) (unsafeCoerce y))
+toTexture :: (GLfloat, GLfloat) -> IO ()
+toTexture (x,y) = texCoord2f (TexCoord2 x y)
                 where texCoord2f = texCoord :: TexCoord2 GLfloat -> IO ()
 
 
+toVertexAndTexture :: (GLdouble, GLdouble) -> GLdouble -> GLdouble -> IO ()
 toVertexAndTexture (x,y) r angle = do toVertex (x + cos(angle)*r, y + sin(angle)*r)
-                                      toTexture (0.5 + cos(angle)*0.5, 0.5 + sin(angle)*0.5)
+                                      toTexture (glDoubleToGLfloat (0.5 + cos(angle)*0.5), glDoubleToGLfloat (0.5 + sin(angle)*0.5))
 
 toVandT2 (x,y) (w,h,s,t) = do toVertex (x + w, y + h)
                               toTexture (s,t)
 
-                              
+-- types
+-- type CpFloat = Double
+-- type GLdouble = CDouble
+-- type GLfloat = CFloat
+cpFloatToGLdouble :: CpFloat -> GLdouble
+cpFloatToGLdouble = unsafeCoerce
+
+glDoubleToGLfloat :: GLdouble -> GLfloat
+glDoubleToGLfloat (CDouble d) = CFloat $ double2Float d
 
 -- circle around position
 circle :: (GLdouble, GLdouble) -> IO ()
 circle (x,y) = preservingMatrix $ do
     let poly  = 24
         ang p = p * 2 * pi / poly
-        r = unsafeCoerce ballRadius
+        r = cpFloatToGLdouble ballRadius
         pos   = map (\p -> (x+cos(ang p)*r, y + sin(ang p)*r)) [1,2..poly]
     -- we now want to use the texture
     color $ Color3 1 1 (1 :: GLdouble)
@@ -163,13 +179,13 @@ rectangle x1 = do
             let y1 = ledgeHeight -- constant y
                 vert = map (\(w, h) -> (x1 + w, ledgeHeight + h)) rectDims
             renderPrimitive Graphics.UI.GLUT.Polygon $
-                mapM_ (toVertex) vert
+                mapM_ (toVertex . cDoubleTuple) vert
 
 line :: ((Double, Double), (Double, Double)) -> IO ()
 line ((x1, y1), (x2, y2)) = do
             color $ Color3 0 0 (0 :: GLdouble)
             renderPrimitive Graphics.UI.GLUT.Lines $
-                mapM_ (toVertex) [(x1, y1), (x2, y2)]
+                mapM_ (toVertex . cDoubleTuple) [(x1, y1), (x2, y2)]
 
 
 -- ball/circle radius should be defined in one place
@@ -184,7 +200,7 @@ ball space pos rad = do
     spaceAdd space b
 
     -- Shape.
-    bshape <- newShape b (Circle $ unsafeCoerce rad) (Vector 0 0)
+    bshape <- newShape b (Circle $ rad) (Vector 0 0)
     elasticity bshape    $= 2.0
     friction bshape      $= 0.1
     spaceAdd space bshape
@@ -289,7 +305,7 @@ display gamestate mbTexName = do
    texture Texture2D $= Enabled
    textureFunction $= Replace
    when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
-   circle (unsafeCoerce x, unsafeCoerce y)
+   circle (cpFloatToGLdouble x, cpFloatToGLdouble y)
    texture Texture2D $= Disabled
 
    -- some letters
@@ -299,7 +315,7 @@ display gamestate mbTexName = do
    rasterPos2i (Vertex2 20 60)
    printString fontOffset "THE QUICK BROWN FOX JUMPS"
 
-   rectangle (unsafeCoerce ledgePos) -- draw ledge
+   rectangle (ledgePos) -- draw ledge
 
    line borderPos
 
