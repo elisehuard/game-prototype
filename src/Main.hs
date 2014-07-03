@@ -96,15 +96,15 @@ loadTexture = do
                    else return Nothing
     when (isJust mbTexName) $ textureBinding Texture2D $= mbTexName
     textureFunction $= Replace
+    {-
     textureFilter Texture2D $= ((Nearest, Nothing), Nearest) -- nearest or linear
     textureWrapMode Texture2D S $= (Repeated, ClampToEdge) -- or ClampToEdge if bigger than shape. if clam s and t from 0 to 1, if repeat then depends on repeats
     textureWrapMode Texture2D T $= (Repeated, ClampToEdge)
     withCheckImage checkImageSize 0x08 (\c -> Color4 c c c 255) $
       texImage2D Texture2D NoProxy 0  RGBA' checkImageSize 0
-    {-
+    -}
     Right img <- loadImage "images/smiley.png"
     tex <- compileTexture2DRGBAF False True img
-    -}
     return mbTexName
 
 framerate space = do
@@ -121,9 +121,6 @@ framerate space = do
 
 toVertex :: (GLdouble, GLdouble) -> IO ()
 toVertex (x,y) = vertex $ Vertex2 x y
-
-cDoubleTuple :: (Double, Double) -> (CDouble, CDouble)
-cDoubleTuple (x, y) = (unsafeCoerce x, unsafeCoerce y)
 
 
 -- texture
@@ -150,6 +147,9 @@ cpFloatToGLdouble = unsafeCoerce
 
 glDoubleToGLfloat :: GLdouble -> GLfloat
 glDoubleToGLfloat (CDouble d) = CFloat $ double2Float d
+
+cDoubleTuple :: (Double, Double) -> (CDouble, CDouble)
+cDoubleTuple (x, y) = (unsafeCoerce x, unsafeCoerce y)
 
 -- circle around position
 circle :: (GLdouble, GLdouble) -> IO ()
