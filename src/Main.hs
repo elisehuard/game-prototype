@@ -408,13 +408,6 @@ playSound buf = do
         unless (null errs) $ do
             hPutStrLn stderr (concat (intersperse "," [ d | ALError _ d <- errs ]))
             --exitFailure
-        -- Check every 0.1 seconds if the sound is still playing.
-        let waitWhilePlaying = do
-                sleep 0.1
-                state <- get (sourceState source)
-                when (state == Playing) $
-                    waitWhilePlaying
-        waitWhilePlaying
         return True
 
 main :: IO ()
